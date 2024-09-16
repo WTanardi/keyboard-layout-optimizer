@@ -8,9 +8,9 @@ using Test
 # TODO:
 # x Init_pop
 # x eval_fit
-# 	- Character frequency
-# 	- Bigram
-# 	- Trigram
+# 	- Travel Distance
+# 	- Finger Usage
+# 	- Consecutive Finger Use
 # x selection
 # x crossover
 # x mutate
@@ -153,46 +153,35 @@ function find_character_index(matrix::Matrix, char::Char)
   end
 end
 
+default_finger_coordinate = Dict(
+  "01_L-Pinky" => (2, 1),
+  "02_L-Ring" => (2, 2),
+  "03_L-Middle" => (2, 3),
+  "04_L-Index" => (2, 4),
+  "05_R-Index" => (2, 7),
+  "06_R-Middle" => (2, 8),
+  "07_R-Ring" => (2, 9),
+  "08_R-Pinky" => (2, 10)
+)
+
 function evaluate_fitness(genome::Matrix{Char})
   score = 0
-  dummy_text = open(io -> read(io, String), "dummy_text.txt")
 
-  score += evaluate_travel_distance(genome, dummy_text)
+  test_text = open(io -> read(io, String), "dummy_text.txt")
 
-  return score
+  score += evaluate_travel_distance(genome, test_text)
+
+  # Fitness = Dict(
+  # 	"Travel distance" => total_distance,
+  # 	"Finger balance" => finger_usage,
+  # 	"Consecutive finger usage" => tst,
+  # )
 end
 
-function evaluate_travel_distance(genome::Matrix{Char}, text_file)
-  default_finger_coordinate = Dict(
-    "01_L-Pinky" => (2, 1),
-    "02_L-Ring" => (2, 2),
-    "03_L-Middle" => (2, 3),
-    "04_L-Index" => (2, 4),
-    "05_R-Index" => (2, 7),
-    "06_R-Middle" => (2, 8),
-    "07_R-Ring" => (2, 9),
-    "08_R-Pinky" => (2, 10)
-  )
-
-  finger_assignments = Dict()
-
-  for i in 1:3
-    finger_assignments[genome[i, 1]] = "01_L-Pinky"
-    finger_assignments[genome[i, 2]] = "02_L-Ring"
-    finger_assignments[genome[i, 3]] = "03_L-Middle"
-    for j in 4:5
-      finger_assignments[genome[i, j]] = "04_L-Index"
-    end
-    for j in 6:7
-      finger_assignments[genome[i, j]] = "05_R-Index"
-    end
-    finger_assignments[genome[i, 8]] = "06_R-Middle"
-    finger_assignments[genome[i, 9]] = "07_R-Ring"
-    finger_assignments[genome[i, 10]] = "08_R-Pinky"
-  end
+function evaluate_travel_distance(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
 
   total_distance = 0
-
   buffer_coordinates = (0, 0)
   buffer_finger = ""
 
@@ -215,6 +204,43 @@ function evaluate_travel_distance(genome::Matrix{Char}, text_file)
   end
 
   return round(total_distance, digits=2)
+end
+
+function evaluate_finger_balance(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
+
+  finger_usage = Dict()
+  for finger in values(finger_assignments)
+    finger_usage[finger] = 0
+  end
+
+  for char in lowercase(text_file)
+    if !isspace(char) && (char in genome)
+      current_finger = finger_assignments[char]
+      finger_usage[current_finger] += 1
+    end
+  end
+
+  return finger_usage
+end
+
+function evaluate_consecutive_finger_usage(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
+
+  count = 0
+  buffer_finger = ""
+
+  for char in lowercase(text_file)
+    if !isspace(char) && (char in genome)
+      current_finger = finger_assignments[char]
+      if current_finger == buffer_finger
+        count += 1
+      end
+      buffer_finger = current_finger
+    end
+  end
+
+  return count
 end
 
 function selection(fit_scores, k)
@@ -311,15 +337,45 @@ function mutate(offspring)
   return offspring
 end
 
+function create_finger_assignment_dict(genome)
+  finger_assignments = Dict()
+
+  for i in 1:3
+    finger_assignments[genome[i, 1]] = "01_L-Pinky"
+    finger_assignments[genome[i, 2]] = "02_L-Ring"
+    finger_assignments[genome[i, 3]] = "03_L-Middle"
+    for j in 4:5
+      finger_assignments[genome[i, j]] = "04_L-Index"
+    end
+    for j in 6:7
+      finger_assignments[genome[i, j]] = "05_R-Index"
+    end
+    finger_assignments[genome[i, 8]] = "06_R-Middle"
+    finger_assignments[genome[i, 9]] = "07_R-Ring"
+    finger_assignments[genome[i, 10]] = "08_R-Pinky"
+  end
+
+  return finger_assignments
+end
 
 @time best_layout = geneticalgorithm()
 println("Best Layout")
 println(best_layout, evaluate_fitness(best_layout))
 
-# qwerty = [
-#   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
-#   'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';',
-#   'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
-# ]
-#
-# reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
+qwerty = [
+  'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
+  'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';',
+  'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
+]
+reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
+println("Qwerty score: 15585.5")
+# println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
+
+halmak = [
+  'w', 'l', 'r', 'b', 'z', ';', 'q', 'u', 'd', 'j',
+  's', 'h', 'n', 't', ',', '.', 'a', 'e', 'o', 'i',
+  'f', 'm', 'v', 'c', '/', 'g', 'p', 'x', 'k', 'y'
+]
+reshaped_halmak = permutedims(reshape(halmak, 10, 3))
+println("Halmak score: 9514.65")
+# println("Halmak score: ", evaluate_fitness(reshaped_halmak))

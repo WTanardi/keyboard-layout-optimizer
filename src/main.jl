@@ -205,7 +205,6 @@ function analyze_trigrams(input_file, output_file)
   end
 end
 
-
 function preprocessing()
   filterdict(source_file)
   compiledict(dict_file)
