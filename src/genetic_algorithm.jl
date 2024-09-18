@@ -1,25 +1,11 @@
-##### Genetic Algorithm
-
 using Random
 using PrettyPrinting
 using Base: ReverseOrdering
 using Test
 
-# TODO:
-# x Init_pop
-# x eval_fit
-# 	- Travel Distance
-# 	- Finger Usage
-# 	- Consecutive Finger Use
-# x selection
-# x crossover
-# x mutate
-# - replace_pop
-# - objective
-
 function geneticalgorithm()
-  POPULATION_SIZE = 5
-  MAX_GENERATIONS = 2
+  POPULATION_SIZE = 24
+  MAX_GENERATIONS = 1000
   MUTATION_RATE = 2
   CROSSOVER_RATE = 75
 
@@ -32,7 +18,7 @@ function geneticalgorithm()
       push!(fit_scores, [gen, genome, genome_fitness])
     end
 
-    sorted_pop = sort(fit_scores, by=x -> x[3])
+    sorted_pop = sort(fit_scores, by=x -> x[3], rev=true)
     parents = selection(sorted_pop, 5)
 
     new_pop = []
@@ -69,6 +55,223 @@ end
 
 function initialize_population(pop_size::Int64)::Vector{Matrix{Char}}
   return [generate_random_genome() for _ in 1:pop_size]
+end
+
+function evaluate_fitness(genome::Matrix{Char})
+  score = 0
+
+  test_text = open(io -> read(io, String), "dummy_text.txt")
+
+  td_score = evaluate_travel_distance(genome, test_text)
+  fb_score = evaluate_finger_balance(genome, test_text)
+  # cu_score = evaluate_consecutive_finger_usage(genome, test_text)
+
+  td_norm = 1 - (td_score / 15585.5)
+  fb_norm = ((4479 - abs(fb_score)) / 4479)
+
+  td_weight = 0.8
+  fb_weight = 0.2
+  # cu_weight = 1
+
+  score += (td_norm * td_weight) + (fb_norm * fb_weight)
+
+  return score
+end
+
+function evaluate_travel_distance(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
+
+  total_distance = 0
+  buffer_coordinates = (0, 0)
+  buffer_finger = ""
+
+  for char in lowercase(text_file)
+    if !isspace(char) && (char in genome)
+      current_finger = finger_assignments[char]
+
+      if current_finger == buffer_finger
+        start_coordinates = buffer_coordinates
+      else
+        start_coordinates = default_finger_coordinate[current_finger]
+      end
+
+      end_coordinates = find_character_index(genome, char)
+      total_distance += calculate_travel_distance(start_coordinates[1], start_coordinates[2], end_coordinates[1], end_coordinates[2])
+
+      buffer_coordinates = end_coordinates
+      buffer_finger = finger_assignments[char]
+    end
+  end
+
+  return round(total_distance, digits=2)
+end
+
+function evaluate_finger_balance(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
+
+  finger_usage = Dict()
+  for finger in values(finger_assignments)
+    finger_usage[finger] = 0
+  end
+
+  for char in lowercase(text_file)
+    if !isspace(char) && (char in genome)
+      current_finger = finger_assignments[char]
+      finger_usage[current_finger] += 1
+    end
+  end
+
+  sorted_keys = sort(collect(keys(finger_usage)))
+
+  difference = 0
+
+  for i in 1:div(length(sorted_keys), 2)
+    key_left = sorted_keys[i]
+    key_right = sorted_keys[end-i+1]
+
+    value_left = finger_usage[key_left]
+    value_right = finger_usage[key_right]
+
+    difference += -abs(value_left - value_right)
+  end
+
+  return difference
+end
+
+function evaluate_consecutive_usage(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
+
+  count = 0
+  buffer_finger = ""
+
+  for char in lowercase(text_file)
+    if !isspace(char) && (char in genome)
+      current_finger = finger_assignments[char]
+      if current_finger == buffer_finger
+        count += 1
+      end
+      buffer_finger = current_finger
+    end
+  end
+
+  return count
+end
+
+function selection(fit_scores, k)
+  parents = []
+  current_elite = []
+
+  for i in eachindex(fit_scores)
+    if i == 1
+      current_elite = fit_scores[i][2]
+      buffer_elite = fit_scores[i][2]
+      buffer_score = fit_scores[i][3]
+    else
+      buffer_elite = fit_scores[i][2]
+      buffer_score = fit_scores[i][3]
+    end
+    if buffer_score > fit_scores[i][3]
+      current_elite = buffer_elite
+    end
+  end
+
+  push!(parents, current_elite)
+
+  warrior = rand(fit_scores, k)
+
+  score_array = []
+
+  for i in eachindex(warrior)
+    if fit_scores[i][2] !== current_elite
+      push!(score_array, fit_scores[i][3])
+    end
+  end
+
+  champion = nothing
+
+  champion_score = maximum(score_array)
+
+  for i in eachindex(fit_scores)
+    if champion_score == fit_scores[i][3]
+      champion = fit_scores[i][2]
+    end
+  end
+  push!(parents, champion)
+end
+
+function crossover(selected_parents)
+  offspring = fill(' ', 3, 10)
+  visited = fill(false, 3, 10)
+
+  mom = vec(selected_parents[1])
+  dad = vec(selected_parents[2])
+  flat_offspring = vec(offspring)
+
+  for i in eachindex(mom)
+    if visited[i]
+      continue
+    end
+
+    cycle_start = i
+    cycle_value = mom[i]
+
+    while true
+      flat_offspring[cycle_start] = mom[cycle_start]
+      visited[cycle_start] = true
+
+      cycle_start = findfirst(==(cycle_value), dad)
+      cycle_value = mom[cycle_start]
+
+      if visited[cycle_start]
+        break
+      end
+    end
+  end
+
+  for i in eachindex(dad)
+    if !visited[i]
+      flat_offspring[i] = dad[i]
+    end
+  end
+
+  offspring = reshape(flat_offspring, 3, 10)
+  return offspring
+end
+
+function mutate(offspring)
+  rows, cols = size(offspring)
+
+  i1, j1 = rand(1:rows), rand(1:cols)
+  i2, j2 = rand(1:rows), rand(1:cols)
+
+  temp = offspring[i1, j1]
+  offspring[i1, j1] = offspring[i2, j2]
+  offspring[i2, j2] = temp
+
+  return offspring
+end
+
+# === HELPER FUNCTIONS ===
+
+function create_finger_assignment_dict(genome)
+  finger_assignments = Dict()
+
+  for i in 1:3
+    finger_assignments[genome[i, 1]] = "01_L-Pinky"
+    finger_assignments[genome[i, 2]] = "02_L-Ring"
+    finger_assignments[genome[i, 3]] = "03_L-Middle"
+    for j in 4:5
+      finger_assignments[genome[i, j]] = "04_L-Index"
+    end
+    for j in 6:7
+      finger_assignments[genome[i, j]] = "05_R-Index"
+    end
+    finger_assignments[genome[i, 8]] = "06_R-Middle"
+    finger_assignments[genome[i, 9]] = "07_R-Ring"
+    finger_assignments[genome[i, 10]] = "08_R-Pinky"
+  end
+
+  return finger_assignments
 end
 
 function calculate_travel_distance(start_x, start_y, end_x, end_y)
@@ -164,203 +367,15 @@ default_finger_coordinate = Dict(
   "08_R-Pinky" => (2, 10)
 )
 
-function evaluate_fitness(genome::Matrix{Char})
-  score = 0
+# === TESTING ===
 
-  test_text = open(io -> read(io, String), "dummy_text.txt")
-
-  score += evaluate_travel_distance(genome, test_text)
-
-  # Fitness = Dict(
-  # 	"Travel distance" => total_distance,
-  # 	"Finger balance" => finger_usage,
-  # 	"Consecutive finger usage" => tst,
-  # )
-end
-
-function evaluate_travel_distance(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
-
-  total_distance = 0
-  buffer_coordinates = (0, 0)
-  buffer_finger = ""
-
-  for char in lowercase(text_file)
-    if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
-
-      if current_finger == buffer_finger
-        start_coordinates = buffer_coordinates
-      else
-        start_coordinates = default_finger_coordinate[current_finger]
-      end
-
-      end_coordinates = find_character_index(genome, char)
-      total_distance += calculate_travel_distance(start_coordinates[1], start_coordinates[2], end_coordinates[1], end_coordinates[2])
-
-      buffer_coordinates = end_coordinates
-      buffer_finger = finger_assignments[char]
-    end
-  end
-
-  return round(total_distance, digits=2)
-end
-
-function evaluate_finger_balance(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
-
-  finger_usage = Dict()
-  for finger in values(finger_assignments)
-    finger_usage[finger] = 0
-  end
-
-  for char in lowercase(text_file)
-    if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
-      finger_usage[current_finger] += 1
-    end
-  end
-
-  return finger_usage
-end
-
-function evaluate_consecutive_finger_usage(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
-
-  count = 0
-  buffer_finger = ""
-
-  for char in lowercase(text_file)
-    if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
-      if current_finger == buffer_finger
-        count += 1
-      end
-      buffer_finger = current_finger
-    end
-  end
-
-  return count
-end
-
-function selection(fit_scores, k)
-  parents = []
-  current_elite = []
-
-  for i in eachindex(fit_scores)
-    if i == 1
-      current_elite = fit_scores[i][2]
-      buffer_elite = fit_scores[i][2]
-      buffer_score = fit_scores[i][3]
-    else
-      buffer_elite = fit_scores[i][2]
-      buffer_score = fit_scores[i][3]
-    end
-    if buffer_score < fit_scores[i][3]
-      current_elite = buffer_elite
-    end
-  end
-
-  push!(parents, current_elite)
-
-  warrior = rand(fit_scores, k)
-
-  score_array = []
-
-  for i in eachindex(warrior)
-    if fit_scores[i][2] !== current_elite
-      push!(score_array, fit_scores[i][3])
-    end
-  end
-
-  champion = nothing
-
-  champion_score = minimum(score_array)
-
-  for i in eachindex(fit_scores)
-    if champion_score == fit_scores[i][3]
-      champion = fit_scores[i][2]
-    end
-  end
-  push!(parents, champion)
-end
-
-function crossover(selected_parents)
-  offspring = fill(' ', 3, 10)
-  visited = fill(false, 3, 10)
-
-  mom = vec(selected_parents[1])
-  dad = vec(selected_parents[2])
-  flat_offspring = vec(offspring)
-
-  for i in eachindex(mom)
-    if visited[i]
-      continue
-    end
-
-    cycle_start = i
-    cycle_value = mom[i]
-
-    while true
-      flat_offspring[cycle_start] = mom[cycle_start]
-      visited[cycle_start] = true
-
-      cycle_start = findfirst(==(cycle_value), dad)
-      cycle_value = mom[cycle_start]
-
-      if visited[cycle_start]
-        break
-      end
-    end
-  end
-
-  for i in eachindex(dad)
-    if !visited[i]
-      flat_offspring[i] = dad[i]
-    end
-  end
-
-  offspring = reshape(flat_offspring, 3, 10)
-  return offspring
-end
-
-function mutate(offspring)
-  rows, cols = size(offspring)
-
-  i1, j1 = rand(1:rows), rand(1:cols)
-  i2, j2 = rand(1:rows), rand(1:cols)
-
-  temp = offspring[i1, j1]
-  offspring[i1, j1] = offspring[i2, j2]
-  offspring[i2, j2] = temp
-
-  return offspring
-end
-
-function create_finger_assignment_dict(genome)
-  finger_assignments = Dict()
-
-  for i in 1:3
-    finger_assignments[genome[i, 1]] = "01_L-Pinky"
-    finger_assignments[genome[i, 2]] = "02_L-Ring"
-    finger_assignments[genome[i, 3]] = "03_L-Middle"
-    for j in 4:5
-      finger_assignments[genome[i, j]] = "04_L-Index"
-    end
-    for j in 6:7
-      finger_assignments[genome[i, j]] = "05_R-Index"
-    end
-    finger_assignments[genome[i, 8]] = "06_R-Middle"
-    finger_assignments[genome[i, 9]] = "07_R-Ring"
-    finger_assignments[genome[i, 10]] = "08_R-Pinky"
-  end
-
-  return finger_assignments
-end
-
+test_text = open(io -> read(io, String), "dummy_text.txt")
 @time best_layout = geneticalgorithm()
+
 println("Best Layout")
 println(best_layout, evaluate_fitness(best_layout))
+# println(best_layout)
+# pprintln(evaluate_finger_balance(best_layout, test_text))
 
 qwerty = [
   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
@@ -368,8 +383,10 @@ qwerty = [
   'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
 ]
 reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
-println("Qwerty score: 15585.5")
-# println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
+# println("Qwerty score: 15585.5")
+println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
+# println("QWERTY")
+# pprintln(evaluate_finger_balance(reshaped_qwerty, test_text))
 
 halmak = [
   'w', 'l', 'r', 'b', 'z', ';', 'q', 'u', 'd', 'j',
@@ -377,5 +394,7 @@ halmak = [
   'f', 'm', 'v', 'c', '/', 'g', 'p', 'x', 'k', 'y'
 ]
 reshaped_halmak = permutedims(reshape(halmak, 10, 3))
-println("Halmak score: 9514.65")
-# println("Halmak score: ", evaluate_fitness(reshaped_halmak))
+# println("Halmak score: 9514.65")
+println("Halmak score: ", evaluate_fitness(reshaped_halmak))
+# println("Halmak")
+# pprintln(evaluate_finger_balance(reshaped_halmak, test_text))
