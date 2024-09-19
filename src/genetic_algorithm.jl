@@ -1,10 +1,10 @@
 using Random
 using PrettyPrinting
-using Base: ReverseOrdering
+using Base: ReverseOrdering, multiplicativeinverse
 using Test
 
 function geneticalgorithm()
-  POPULATION_SIZE = 24
+  POPULATION_SIZE = 12
   MAX_GENERATIONS = 1000
   MUTATION_RATE = 2
   CROSSOVER_RATE = 75
@@ -64,16 +64,48 @@ function evaluate_fitness(genome::Matrix{Char})
 
   td_score = evaluate_travel_distance(genome, test_text)
   fb_score = evaluate_finger_balance(genome, test_text)
-  # cu_score = evaluate_consecutive_finger_usage(genome, test_text)
+  fu_score = evaluate_finger_usage(genome, test_text)
+  cu_score = evaluate_consecutive_usage(genome, test_text)
 
   td_norm = 1 - (td_score / 15585.5)
   fb_norm = ((4479 - abs(fb_score)) / 4479)
+  fu_norm = 1 - (fu_score / 40316.75)
+  cu_norm = ((1879 - abs(cu_score)) / 1879)
 
-  td_weight = 0.8
+  td_weight = 0.4
   fb_weight = 0.2
-  # cu_weight = 1
+  fu_weight = 0.3
+  cu_weight = 0.1
 
-  score += (td_norm * td_weight) + (fb_norm * fb_weight)
+  score += (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight)
+
+  return score
+end
+
+function evaluate_finger_usage(genome, text_file)
+  finger_assignments = create_finger_assignment_dict(genome)
+
+  finger_usage = Dict()
+  for finger in values(finger_assignments)
+    finger_usage[finger] = 0
+  end
+
+  for char in lowercase(text_file)
+    if !isspace(char) && (char in genome)
+      current_finger = finger_assignments[char]
+      finger_usage[current_finger] += 1
+    end
+  end
+
+  score = 0
+
+  sorted_fu = sort(collect(finger_usage))
+
+  multiplier_array = [1, 1.75, 2.5, 2.25, 2.25, 2.5, 1.75, 1]
+
+  for i = 1:8
+    score += sorted_fu[i][2] * multiplier_array[i]
+  end
 
   return score
 end
@@ -373,9 +405,11 @@ test_text = open(io -> read(io, String), "dummy_text.txt")
 @time best_layout = geneticalgorithm()
 
 println("Best Layout")
-println(best_layout, evaluate_fitness(best_layout))
-# println(best_layout)
+# println(best_layout, evaluate_fitness(best_layout))
+println(best_layout)
 # pprintln(evaluate_finger_balance(best_layout, test_text))
+pprintln(evaluate_finger_usage(best_layout, test_text))
+# pprintln(evaluate_consecutive_usage(best_layout, test_text))
 
 qwerty = [
   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
@@ -384,9 +418,11 @@ qwerty = [
 ]
 reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
 # println("Qwerty score: 15585.5")
-println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
-# println("QWERTY")
+# println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
+println("QWERTY")
 # pprintln(evaluate_finger_balance(reshaped_qwerty, test_text))
+pprintln(evaluate_finger_usage(reshaped_qwerty, test_text))
+# pprintln(evaluate_consecutive_usage(reshaped_qwerty, test_text))
 
 halmak = [
   'w', 'l', 'r', 'b', 'z', ';', 'q', 'u', 'd', 'j',
@@ -395,6 +431,8 @@ halmak = [
 ]
 reshaped_halmak = permutedims(reshape(halmak, 10, 3))
 # println("Halmak score: 9514.65")
-println("Halmak score: ", evaluate_fitness(reshaped_halmak))
-# println("Halmak")
+# println("Halmak score: ", evaluate_fitness(reshaped_halmak))
+println("Halmak")
 # pprintln(evaluate_finger_balance(reshaped_halmak, test_text))
+pprintln(evaluate_finger_usage(reshaped_halmak, test_text))
+# pprintln(evaluate_consecutive_usage(reshaped_halmak, test_text))
