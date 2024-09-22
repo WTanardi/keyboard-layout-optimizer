@@ -1,9 +1,11 @@
 using Random
 using PrettyPrinting
-using Base: ReverseOrdering, multiplicativeinverse
-using Test
 
-function geneticalgorithm()
+function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
+  if !isnothing(seed)
+    Random.seed!(seed)
+  end
+
   POPULATION_SIZE = 12
   MAX_GENERATIONS = 1000
   MUTATION_RATE = 2
@@ -57,136 +59,97 @@ function initialize_population(pop_size::Int64)::Vector{Matrix{Char}}
   return [generate_random_genome() for _ in 1:pop_size]
 end
 
-function evaluate_fitness(genome::Matrix{Char})
-  score = 0
+function evaluate_fitness(genome)
+  default_finger_coordinate = Dict(
+    "01_L-Pinky" => (2, 1),
+    "02_L-Ring" => (2, 2),
+    "03_L-Middle" => (2, 3),
+    "04_L-Index" => (2, 4),
+    "05_R-Index" => (2, 7),
+    "06_R-Middle" => (2, 8),
+    "07_R-Ring" => (2, 9),
+    "08_R-Pinky" => (2, 10)
+  )
 
-  test_text = open(io -> read(io, String), "dummy_text.txt")
-
-  td_score = evaluate_travel_distance(genome, test_text)
-  fb_score = evaluate_finger_balance(genome, test_text)
-  fu_score = evaluate_finger_usage(genome, test_text)
-  cu_score = evaluate_consecutive_usage(genome, test_text)
-
-  td_norm = 1 - (td_score / 15585.5)
-  fb_norm = ((4479 - abs(fb_score)) / 4479)
-  fu_norm = 1 - (fu_score / 40316.75)
-  cu_norm = ((1879 - abs(cu_score)) / 1879)
-
-  td_weight = 0.4
-  fb_weight = 0.2
-  fu_weight = 0.3
-  cu_weight = 0.1
-
-  score += (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight)
-
-  return score
-end
-
-function evaluate_finger_usage(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
-
-  finger_usage = Dict()
-  for finger in values(finger_assignments)
-    finger_usage[finger] = 0
-  end
-
-  for char in lowercase(text_file)
-    if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
-      finger_usage[current_finger] += 1
+  finger_assignments = Dict()
+  for i in 1:3
+    finger_assignments[genome[i, 1]] = "01_L-Pinky"
+    finger_assignments[genome[i, 2]] = "02_L-Ring"
+    finger_assignments[genome[i, 3]] = "03_L-Middle"
+    for j in 4:5
+      finger_assignments[genome[i, j]] = "04_L-Index"
     end
+    for j in 6:7
+      finger_assignments[genome[i, j]] = "05_R-Index"
+    end
+    finger_assignments[genome[i, 8]] = "06_R-Middle"
+    finger_assignments[genome[i, 9]] = "07_R-Ring"
+    finger_assignments[genome[i, 10]] = "08_R-Pinky"
   end
 
-  score = 0
-
-  sorted_fu = sort(collect(finger_usage))
-
-  multiplier_array = [1, 1.75, 2.5, 2.25, 2.25, 2.5, 1.75, 1]
-
-  for i = 1:8
-    score += sorted_fu[i][2] * multiplier_array[i]
-  end
-
-  return score
-end
-
-function evaluate_travel_distance(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
-
-  total_distance = 0
-  buffer_coordinates = (0, 0)
+  text_file = open(io -> read(io, String), "dummy_text.txt")
+  finger_usage = Dict(finger => 0 for finger in values(finger_assignments))
+  total_distance = 0.0
+  consecutive_usage = 0
   buffer_finger = ""
+  buffer_coordinates = (0, 0)
 
   for char in lowercase(text_file)
     if !isspace(char) && (char in genome)
       current_finger = finger_assignments[char]
 
-      if current_finger == buffer_finger
-        start_coordinates = buffer_coordinates
-      else
-        start_coordinates = default_finger_coordinate[current_finger]
-      end
+      # Finger usage
+      finger_usage[current_finger] += 1
 
+      # Travel distance
+      start_coordinates = current_finger == buffer_finger ? buffer_coordinates : default_finger_coordinate[current_finger]
       end_coordinates = find_character_index(genome, char)
       total_distance += calculate_travel_distance(start_coordinates[1], start_coordinates[2], end_coordinates[1], end_coordinates[2])
 
+      # Consecutive usage
+      if current_finger == buffer_finger
+        consecutive_usage += 1
+      end
+
+      buffer_finger = current_finger
       buffer_coordinates = end_coordinates
-      buffer_finger = finger_assignments[char]
     end
   end
 
-  return round(total_distance, digits=2)
-end
-
-function evaluate_finger_balance(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
-
-  finger_usage = Dict()
-  for finger in values(finger_assignments)
-    finger_usage[finger] = 0
+  # Calculate finger usage score
+  fu_score = 0
+  sorted_fu = sort(collect(finger_usage))
+  multiplier_array = [1, 1.75, 2.5, 2.25, 2.25, 2.5, 1.75, 1]
+  for i = 1:8
+    fu_score += sorted_fu[i][2] * multiplier_array[i]
   end
 
-  for char in lowercase(text_file)
-    if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
-      finger_usage[current_finger] += 1
-    end
-  end
-
+  # Calculate finger balance score
+  fb_score = 0
   sorted_keys = sort(collect(keys(finger_usage)))
-
-  difference = 0
-
   for i in 1:div(length(sorted_keys), 2)
     key_left = sorted_keys[i]
     key_right = sorted_keys[end-i+1]
-
     value_left = finger_usage[key_left]
     value_right = finger_usage[key_right]
-
-    difference += -abs(value_left - value_right)
+    fb_score += -abs(value_left - value_right)
   end
 
-  return difference
-end
+  # Normalize scores
+  td_norm = 1 - (round(total_distance, digits=2) / 15585.5)
+  fb_norm = ((4479 - abs(fb_score)) / 4479)
+  fu_norm = 1 - (fu_score / 40316.75)
+  cu_norm = ((1879 - abs(consecutive_usage)) / 1879)
 
-function evaluate_consecutive_usage(genome, text_file)
-  finger_assignments = create_finger_assignment_dict(genome)
+  # Apply weights and calculate final score
+  td_weight = 0.4
+  fb_weight = 0.25
+  fu_weight = 0.25
+  cu_weight = 0.1
 
-  count = 0
-  buffer_finger = ""
+  final_score = (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight)
 
-  for char in lowercase(text_file)
-    if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
-      if current_finger == buffer_finger
-        count += 1
-      end
-      buffer_finger = current_finger
-    end
-  end
-
-  return count
+  return final_score
 end
 
 function selection(fit_scores, k)
@@ -285,27 +248,6 @@ end
 
 # === HELPER FUNCTIONS ===
 
-function create_finger_assignment_dict(genome)
-  finger_assignments = Dict()
-
-  for i in 1:3
-    finger_assignments[genome[i, 1]] = "01_L-Pinky"
-    finger_assignments[genome[i, 2]] = "02_L-Ring"
-    finger_assignments[genome[i, 3]] = "03_L-Middle"
-    for j in 4:5
-      finger_assignments[genome[i, j]] = "04_L-Index"
-    end
-    for j in 6:7
-      finger_assignments[genome[i, j]] = "05_R-Index"
-    end
-    finger_assignments[genome[i, 8]] = "06_R-Middle"
-    finger_assignments[genome[i, 9]] = "07_R-Ring"
-    finger_assignments[genome[i, 10]] = "08_R-Pinky"
-  end
-
-  return finger_assignments
-end
-
 function calculate_travel_distance(start_x, start_y, end_x, end_y)
   distance_class = Dict(
     "A" => 1.028, # A-Q
@@ -388,27 +330,18 @@ function find_character_index(matrix::Matrix, char::Char)
   end
 end
 
-default_finger_coordinate = Dict(
-  "01_L-Pinky" => (2, 1),
-  "02_L-Ring" => (2, 2),
-  "03_L-Middle" => (2, 3),
-  "04_L-Index" => (2, 4),
-  "05_R-Index" => (2, 7),
-  "06_R-Middle" => (2, 8),
-  "07_R-Ring" => (2, 9),
-  "08_R-Pinky" => (2, 10)
-)
 
 # === TESTING ===
 
+seed = 69420
 test_text = open(io -> read(io, String), "dummy_text.txt")
-@time best_layout = geneticalgorithm()
+@time best_layout = geneticalgorithm(seed)
 
 println("Best Layout")
-# println(best_layout, evaluate_fitness(best_layout))
-println(best_layout)
+println(best_layout, evaluate_fitness(best_layout))
+# println(best_layout)
 # pprintln(evaluate_finger_balance(best_layout, test_text))
-pprintln(evaluate_finger_usage(best_layout, test_text))
+# pprintln(evaluate_finger_usage(best_layout, test_text))
 # pprintln(evaluate_consecutive_usage(best_layout, test_text))
 
 qwerty = [
@@ -418,10 +351,10 @@ qwerty = [
 ]
 reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
 # println("Qwerty score: 15585.5")
-# println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
-println("QWERTY")
+println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
+# println("QWERTY")
 # pprintln(evaluate_finger_balance(reshaped_qwerty, test_text))
-pprintln(evaluate_finger_usage(reshaped_qwerty, test_text))
+# pprintln(evaluate_finger_usage(reshaped_qwerty, test_text))
 # pprintln(evaluate_consecutive_usage(reshaped_qwerty, test_text))
 
 halmak = [
@@ -431,8 +364,8 @@ halmak = [
 ]
 reshaped_halmak = permutedims(reshape(halmak, 10, 3))
 # println("Halmak score: 9514.65")
-# println("Halmak score: ", evaluate_fitness(reshaped_halmak))
-println("Halmak")
+println("Halmak score: ", evaluate_fitness(reshaped_halmak))
+# println("Halmak")
 # pprintln(evaluate_finger_balance(reshaped_halmak, test_text))
-pprintln(evaluate_finger_usage(reshaped_halmak, test_text))
+# pprintln(evaluate_finger_usage(reshaped_halmak, test_text))
 # pprintln(evaluate_consecutive_usage(reshaped_halmak, test_text))
