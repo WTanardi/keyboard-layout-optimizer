@@ -6,8 +6,8 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     Random.seed!(seed)
   end
 
-  POPULATION_SIZE = 12
-  MAX_GENERATIONS = 1000
+  POPULATION_SIZE = 36
+  MAX_GENERATIONS = 300
   MUTATION_RATE = 2
   CROSSOVER_RATE = 75
 
@@ -28,7 +28,7 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
 
     while length(new_pop) < POPULATION_SIZE
       if rand(1:100) < CROSSOVER_RATE
-        child = crossover(parents)
+        child = crossover(parents[1], parents[2])
         if rand(1:100) < MUTATION_RATE
           child = mutate(child)
         end
@@ -89,6 +89,7 @@ function evaluate_fitness(genome)
 
   text_file = open(io -> read(io, String), "dummy_text.txt")
   finger_usage = Dict(finger => 0 for finger in values(finger_assignments))
+  char_freq = zeros(3, 10)
   total_distance = 0.0
   consecutive_usage = 0
   buffer_finger = ""
@@ -98,12 +99,15 @@ function evaluate_fitness(genome)
     if !isspace(char) && (char in genome)
       current_finger = finger_assignments[char]
 
+      (i, j) = find_character_index(genome, char)
+
       # Finger usage
       finger_usage[current_finger] += 1
+      char_freq[i, j] += 1
 
       # Travel distance
       start_coordinates = current_finger == buffer_finger ? buffer_coordinates : default_finger_coordinate[current_finger]
-      end_coordinates = find_character_index(genome, char)
+      end_coordinates = (i, j)
       total_distance += calculate_travel_distance(start_coordinates[1], start_coordinates[2], end_coordinates[1], end_coordinates[2])
 
       # Consecutive usage
@@ -119,10 +123,21 @@ function evaluate_fitness(genome)
   # Calculate finger usage score
   fu_score = 0
   sorted_fu = sort(collect(finger_usage))
-  multiplier_array = [1, 1.75, 2.5, 2.25, 2.25, 2.5, 1.75, 1]
+  multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
   for i = 1:8
     fu_score += sorted_fu[i][2] * multiplier_array[i]
   end
+
+  # Calculate character frequency score
+  cf_score = 0
+  multiplier_array = [
+    [1.0, 3.5, 3.5, 2.5, 2.0, 1.0, 2.5, 3.5, 3.5, 1.0],
+    [4.0, 4.0, 4.0, 4.0, 1.0, 1.0, 4.0, 4.0, 4.0, 4.0],
+    [2.0, 3.0, 3.0, 2.5, 1.0, 2.0, 2.5, 3.0, 3.0, 2.0]
+  ]
+
+  cf_score = sum(sum(char_freq .* multiplier_array))
+  # println("cfScore: ", cf_score)
 
   # Calculate finger balance score
   fb_score = 0
@@ -135,19 +150,33 @@ function evaluate_fitness(genome)
     fb_score += -abs(value_left - value_right)
   end
 
+  # println(round(total_distance, digits=2))
+  # println(abs(fb_score))
+  # println(fu_score)
+  # println(abs(consecutive_usage))
+  # println(cf_score)
+
   # Normalize scores
-  td_norm = 1 - (round(total_distance, digits=2) / 15585.5)
-  fb_norm = ((4479 - abs(fb_score)) / 4479)
-  fu_norm = 1 - (fu_score / 40316.75)
-  cu_norm = ((1879 - abs(consecutive_usage)) / 1879)
+  td_norm = 1 - (round(total_distance, digits=2) / 15585.5) # Lower better
+  fb_norm = ((4479 - abs(fb_score)) / 4479) # Lower better (closer to 0)
+  fu_norm = ((fu_score - 44950.5) / 44950.5) # Higher better
+  cu_norm = ((1879 - abs(consecutive_usage)) / 1879) # Lower better
+  cf_norm = ((cf_score - 567652) / 567652) # Higher better
 
   # Apply weights and calculate final score
-  td_weight = 0.4
-  fb_weight = 0.25
-  fu_weight = 0.25
+  td_weight = 0.3
+  fb_weight = 0.1
+  fu_weight = 0.2
   cu_weight = 0.1
+  cf_weight = 0.3
 
-  final_score = (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight)
+  # println(td_norm * td_weight)
+  # println(fb_norm * fb_weight)
+  # println(fu_norm * fu_weight)
+  # println(cu_norm * cu_weight)
+  # println(cf_norm * cf_weight)
+
+  final_score = (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight) + (cf_norm * cf_weight)
 
   return final_score
 end
@@ -170,7 +199,7 @@ function selection(fit_scores, k)
     end
   end
 
-  push!(parents, current_elite)
+  push!(parents, vec(current_elite))
 
   warrior = rand(fit_scores, k)
 
@@ -191,46 +220,43 @@ function selection(fit_scores, k)
       champion = fit_scores[i][2]
     end
   end
-  push!(parents, champion)
+  push!(parents, vec(champion))
 end
 
-function crossover(selected_parents)
-  offspring = fill(' ', 3, 10)
-  visited = fill(false, 3, 10)
+function crossover(parent1::Vector{Char}, parent2::Vector{Char})
+  n = length(parent1)
 
-  mom = vec(selected_parents[1])
-  dad = vec(selected_parents[2])
-  flat_offspring = vec(offspring)
+  point1, point2 = sort(rand(1:n, 2))
 
-  for i in eachindex(mom)
-    if visited[i]
-      continue
-    end
+  child = fill(' ', n)
 
-    cycle_start = i
-    cycle_value = mom[i]
+  child[point1:point2] = parent1[point1:point2]
 
-    while true
-      flat_offspring[cycle_start] = mom[cycle_start]
-      visited[cycle_start] = true
-
-      cycle_start = findfirst(==(cycle_value), dad)
-      cycle_value = mom[cycle_start]
-
-      if visited[cycle_start]
-        break
+  function fill_child!(child::Vector{Char}, parent::Vector{Char})
+    j = point2 + 1
+    i = point2 + 1
+    while !all(!isspace, child)
+      if j > n
+        j = 1
       end
+      if i > n
+        i = 1
+      end
+      if !(parent[i] in child)
+        child[j] = parent[i]
+        j = j + 1
+        if j > point1 && j <= point2
+          j = point2 + 1
+        end
+      end
+      i += 1
     end
   end
 
-  for i in eachindex(dad)
-    if !visited[i]
-      flat_offspring[i] = dad[i]
-    end
-  end
+  fill_child!(child, parent2)
 
-  offspring = reshape(flat_offspring, 3, 10)
-  return offspring
+  child = permutedims(reshape(child, 10, 3))
+  return child
 end
 
 function mutate(offspring)
@@ -330,19 +356,13 @@ function find_character_index(matrix::Matrix, char::Char)
   end
 end
 
-
 # === TESTING ===
 
-seed = 69420
-test_text = open(io -> read(io, String), "dummy_text.txt")
+seed = 420
 @time best_layout = geneticalgorithm(seed)
 
 println("Best Layout")
 println(best_layout, evaluate_fitness(best_layout))
-# println(best_layout)
-# pprintln(evaluate_finger_balance(best_layout, test_text))
-# pprintln(evaluate_finger_usage(best_layout, test_text))
-# pprintln(evaluate_consecutive_usage(best_layout, test_text))
 
 qwerty = [
   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
@@ -350,12 +370,7 @@ qwerty = [
   'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
 ]
 reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
-# println("Qwerty score: 15585.5")
 println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
-# println("QWERTY")
-# pprintln(evaluate_finger_balance(reshaped_qwerty, test_text))
-# pprintln(evaluate_finger_usage(reshaped_qwerty, test_text))
-# pprintln(evaluate_consecutive_usage(reshaped_qwerty, test_text))
 
 halmak = [
   'w', 'l', 'r', 'b', 'z', ';', 'q', 'u', 'd', 'j',
@@ -363,9 +378,12 @@ halmak = [
   'f', 'm', 'v', 'c', '/', 'g', 'p', 'x', 'k', 'y'
 ]
 reshaped_halmak = permutedims(reshape(halmak, 10, 3))
-# println("Halmak score: 9514.65")
 println("Halmak score: ", evaluate_fitness(reshaped_halmak))
-# println("Halmak")
-# pprintln(evaluate_finger_balance(reshaped_halmak, test_text))
-# pprintln(evaluate_finger_usage(reshaped_halmak, test_text))
-# pprintln(evaluate_consecutive_usage(reshaped_halmak, test_text))
+
+test = [
+  'f', 'h', 'b', 'g', 'c', ';', 'p', 'l', 'd', 'v',
+  'u', 'r', 'a', 'e', 'k', 't', 'i', 'n', 'm', 's',
+  'q', 'x', 'z', 'o', 'w', 'j', 'y', ',', '.', '/'
+]
+reshaped_test = permutedims(reshape(test, 10, 3))
+println("Test score: ", evaluate_fitness(reshaped_test))
