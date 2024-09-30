@@ -6,10 +6,11 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     Random.seed!(seed)
   end
 
-  POPULATION_SIZE = 36
-  MAX_GENERATIONS = 300
-  MUTATION_RATE = 2
+  POPULATION_SIZE = 500
+  MAX_GENERATIONS = 1000
+  MUTATION_RATE = 10
   CROSSOVER_RATE = 75
+  ELITE_SIZE = 25
 
   pop = initialize_population(POPULATION_SIZE)
 
@@ -21,10 +22,12 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     end
 
     sorted_pop = sort(fit_scores, by=x -> x[3], rev=true)
-    parents = selection(sorted_pop, 5)
 
-    new_pop = []
-    push!(new_pop, sorted_pop[1][2])
+    elite = [individual[2] for individual in sorted_pop[1:ELITE_SIZE]]
+
+    parents = roulette_selection(sorted_pop)
+
+    new_pop = copy(elite)
 
     while length(new_pop) < POPULATION_SIZE
       if rand(1:100) < CROSSOVER_RATE
@@ -123,6 +126,7 @@ function evaluate_fitness(genome)
   # Calculate finger usage score
   fu_score = 0
   sorted_fu = sort(collect(finger_usage))
+
   multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
   for i = 1:8
     fu_score += sorted_fu[i][2] * multiplier_array[i]
@@ -137,7 +141,6 @@ function evaluate_fitness(genome)
   ]
 
   cf_score = sum(sum(char_freq .* multiplier_array))
-  # println("cfScore: ", cf_score)
 
   # Calculate finger balance score
   fb_score = 0
@@ -164,66 +167,38 @@ function evaluate_fitness(genome)
   cf_norm = ((cf_score - 567652) / 567652) # Higher better
 
   # Apply weights and calculate final score
-  td_weight = 0.3
-  fb_weight = 0.1
-  fu_weight = 0.2
-  cu_weight = 0.1
-  cf_weight = 0.3
-
-  # println(td_norm * td_weight)
-  # println(fb_norm * fb_weight)
-  # println(fu_norm * fu_weight)
-  # println(cu_norm * cu_weight)
-  # println(cf_norm * cf_weight)
+  td_weight = 1
+  fb_weight = 0
+  fu_weight = 0
+  cu_weight = 0
+  cf_weight = 0
 
   final_score = (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight) + (cf_norm * cf_weight)
 
   return final_score
 end
 
-function selection(fit_scores, k)
-  parents = []
-  current_elite = []
+function roulette_selection(fit_scores)
+  total_fitness = sum(x -> x[3], fit_scores)
+  r1, r2 = rand(2) .* total_fitness
+  current_sum = 0.0
+  first_parent = last(fit_scores[2])
+  second_parent = last(fit_scores[2])
 
   for i in eachindex(fit_scores)
-    if i == 1
-      current_elite = fit_scores[i][2]
-      buffer_elite = fit_scores[i][2]
-      buffer_score = fit_scores[i][3]
-    else
-      buffer_elite = fit_scores[i][2]
-      buffer_score = fit_scores[i][3]
+    current_sum += fit_scores[i][3]
+    if current_sum > r1
+      first_parent = vec(fit_scores[i][2])
     end
-    if buffer_score > fit_scores[i][3]
-      current_elite = buffer_elite
+    if current_sum > r2
+      second_parent = vec(fit_scores[i][2])
     end
   end
 
-  push!(parents, vec(current_elite))
-
-  warrior = rand(fit_scores, k)
-
-  score_array = []
-
-  for i in eachindex(warrior)
-    if fit_scores[i][2] !== current_elite
-      push!(score_array, fit_scores[i][3])
-    end
-  end
-
-  champion = nothing
-
-  champion_score = maximum(score_array)
-
-  for i in eachindex(fit_scores)
-    if champion_score == fit_scores[i][3]
-      champion = fit_scores[i][2]
-    end
-  end
-  push!(parents, vec(champion))
+  return first_parent, second_parent
 end
 
-function crossover(parent1::Vector{Char}, parent2::Vector{Char})
+function crossover(parent1, parent2)
   n = length(parent1)
 
   point1, point2 = sort(rand(1:n, 2))
@@ -358,8 +333,8 @@ end
 
 # === TESTING ===
 
-seed = 420
-@time best_layout = geneticalgorithm(seed)
+# seed = 69
+@time best_layout = geneticalgorithm()
 
 println("Best Layout")
 println(best_layout, evaluate_fitness(best_layout))
