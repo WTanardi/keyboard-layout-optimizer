@@ -1,18 +1,39 @@
 using Random
 using PrettyPrinting
 
+const seed = 281820
+
+const POPULATION_SIZE = 500
+const MAX_GENERATIONS = 1000
+const MUTATION_RATE = 15
+const CROSSOVER_RATE = 75
+const ELITE_SIZE = 25
+
+const TD_WEIGHT = 0.35
+const FB_WEIGHT = 0.1
+const FU_WEIGHT = 0.2
+const CU_WEIGHT = 0.05
+const TE_WEIGHT = 0.3
+
+const BASE_TD = 15585.5
+const BASE_FB = 4479
+const BASE_FU = 44950.5
+const BASE_CU = 1879
+const BASE_TE = 636459
+
 function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
+  println("Running Genetic Algorithm")
+
+  start_time = time()
+
   if !isnothing(seed)
     Random.seed!(seed)
   end
 
-  POPULATION_SIZE = 500
-  MAX_GENERATIONS = 1000
-  MUTATION_RATE = 10
-  CROSSOVER_RATE = 75
-  ELITE_SIZE = 25
-
   pop = initialize_population(POPULATION_SIZE)
+
+  best_genome = nothing
+  stagnant_count = 0
 
   for gen in 1:MAX_GENERATIONS
     fit_scores = []
@@ -22,11 +43,9 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     end
 
     sorted_pop = sort(fit_scores, by=x -> x[3], rev=true)
-
-    elite = [individual[2] for individual in sorted_pop[1:ELITE_SIZE]]
-
     parents = roulette_selection(sorted_pop)
 
+    elite = [individual[2] for individual in sorted_pop[1:ELITE_SIZE]]
     new_pop = copy(elite)
 
     while length(new_pop) < POPULATION_SIZE
@@ -41,8 +60,28 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
       end
     end
     pop = new_pop
+
+    current_best_genome = pop[1]
+
+    if current_best_genome !== best_genome
+      best_genome = current_best_genome
+      stagnant_count = 0
+    else
+      stagnant_count += 1
+    end
+
+    elapsed_time = time() - start_time
+
+    print("\rGeneration $(gen)'s best: ", best_genome, " | Time elapsed: $(round(elapsed_time, digits=2))s")
+    flush(stdout)
+
+    if stagnant_count > 100
+      println("\nFinished prematurely at: ", gen)
+      return best_genome
+    end
   end
 
+  println("\nDone!")
   return pop[1]
 end
 
@@ -53,9 +92,7 @@ function generate_random_genome()::Matrix{Char}
     'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
   ]
 
-  shuffle!(keys)
-
-  return permutedims(reshape(keys, 10, 3))
+  return permutedims(reshape(shuffle!(keys), 10, 3))
 end
 
 function initialize_population(pop_size::Int64)::Vector{Matrix{Char}}
@@ -74,7 +111,7 @@ function evaluate_fitness(genome)
     "08_R-Pinky" => (2, 10)
   )
 
-  finger_assignments = Dict()
+  finger_assignments = Dict{Char,String}()
   for i in 1:3
     finger_assignments[genome[i, 1]] = "01_L-Pinky"
     finger_assignments[genome[i, 2]] = "02_L-Ring"
@@ -124,23 +161,25 @@ function evaluate_fitness(genome)
   end
 
   # Calculate finger usage score
+  fu_multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
+
+  # fu_score = sum(finger_usage[finger] * fu_multiplier_array[idx] for (idx, finger) in enumerate(keys(finger_usage)))
   fu_score = 0
   sorted_fu = sort(collect(finger_usage))
 
-  multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
+  fu_multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
   for i = 1:8
-    fu_score += sorted_fu[i][2] * multiplier_array[i]
+    fu_score += sorted_fu[i][2] * fu_multiplier_array[i]
   end
 
-  # Calculate character frequency score
-  cf_score = 0
-  multiplier_array = [
-    [1.0, 3.5, 3.5, 2.5, 2.0, 1.0, 2.5, 3.5, 3.5, 1.0],
-    [4.0, 4.0, 4.0, 4.0, 1.0, 1.0, 4.0, 4.0, 4.0, 4.0],
-    [2.0, 3.0, 3.0, 2.5, 1.0, 2.0, 2.5, 3.0, 3.0, 2.0]
+  # Calculate typing effort score
+  te_multiplier_array = [
+    [1.0, 4.0, 4.0, 3.0, 2.0, 1.0, 3.0, 4.0, 4.0, 1.0],
+    [5.0, 5.0, 5.0, 5.0, 1.0, 1.0, 5.0, 5.0, 5.0, 5.0],
+    [1.0, 2.0, 2.0, 3.0, 1.0, 2.0, 3.0, 2.0, 2.0, 1.0]
   ]
 
-  cf_score = sum(sum(char_freq .* multiplier_array))
+  te_score = sum(sum(char_freq .* te_multiplier_array))
 
   # Calculate finger balance score
   fb_score = 0
@@ -160,20 +199,13 @@ function evaluate_fitness(genome)
   # println(cf_score)
 
   # Normalize scores
-  td_norm = 1 - (round(total_distance, digits=2) / 15585.5) # Lower better
-  fb_norm = ((4479 - abs(fb_score)) / 4479) # Lower better (closer to 0)
-  fu_norm = ((fu_score - 44950.5) / 44950.5) # Higher better
-  cu_norm = ((1879 - abs(consecutive_usage)) / 1879) # Lower better
-  cf_norm = ((cf_score - 567652) / 567652) # Higher better
+  td_norm = 1 - (round(total_distance, digits=2) / BASE_TD) # Lower better
+  fb_norm = ((BASE_FB - abs(fb_score)) / BASE_FB) # Lower better (closer to 0)
+  fu_norm = ((fu_score - BASE_FU) / BASE_FU) # Higher better
+  cu_norm = ((BASE_CU - abs(consecutive_usage)) / BASE_CU) # Lower better
+  te_norm = ((te_score - BASE_TE) / BASE_TE) # Higher better
 
-  # Apply weights and calculate final score
-  td_weight = 1
-  fb_weight = 0
-  fu_weight = 0
-  cu_weight = 0
-  cf_weight = 0
-
-  final_score = (td_norm * td_weight) + (fb_norm * fb_weight) + (fu_norm * fu_weight) + (cu_norm * cu_weight) + (cf_norm * cf_weight)
+  final_score = (td_norm * TD_WEIGHT) + (fb_norm * FB_WEIGHT) + (fu_norm * FU_WEIGHT) + (cu_norm * CU_WEIGHT) + (te_norm * TE_WEIGHT)
 
   return final_score
 end
@@ -198,7 +230,7 @@ function roulette_selection(fit_scores)
   return first_parent, second_parent
 end
 
-function crossover(parent1, parent2)
+function crossover(parent1::Vector{Char}, parent2::Vector{Char})
   n = length(parent1)
 
   point1, point2 = sort(rand(1:n, 2))
@@ -230,19 +262,16 @@ function crossover(parent1, parent2)
 
   fill_child!(child, parent2)
 
-  child = permutedims(reshape(child, 10, 3))
-  return child
+  return permutedims(reshape(child, 10, 3))
 end
 
-function mutate(offspring)
+function mutate(offspring::Matrix{Char})
   rows, cols = size(offspring)
 
   i1, j1 = rand(1:rows), rand(1:cols)
   i2, j2 = rand(1:rows), rand(1:cols)
 
-  temp = offspring[i1, j1]
-  offspring[i1, j1] = offspring[i2, j2]
-  offspring[i2, j2] = temp
+  offspring[i1, j1], offspring[i2, j2] = offspring[i2, j2], offspring[i1, j1]
 
   return offspring
 end
@@ -321,20 +350,24 @@ function calculate_travel_distance(start_x, start_y, end_x, end_y)
   return distance
 end
 
-function find_character_index(matrix::Matrix, char::Char)
-  for i = 1:3
-    for j = 1:10
-      if matrix[i, j] == lowercase(char)
+function find_character_index(matrix::Matrix{Char}, char::Char)
+  lc_char = lowercase(char)
+  rows, cols = size(matrix)
+
+  for i in 1:rows
+    for j in 1:cols
+      if matrix[i, j] == lc_char
         return (i, j)
       end
     end
   end
+
+  return nothing
 end
 
 # === TESTING ===
 
-# seed = 69
-@time best_layout = geneticalgorithm()
+@time best_layout = geneticalgorithm(seed)
 
 println("Best Layout")
 println(best_layout, evaluate_fitness(best_layout))
