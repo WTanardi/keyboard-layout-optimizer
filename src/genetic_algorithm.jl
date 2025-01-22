@@ -3,11 +3,11 @@ using PrettyPrinting
 
 const seed = 281820
 
-const POPULATION_SIZE = 500
+const POPULATION_SIZE = 2000
 const MAX_GENERATIONS = 1000
-const MUTATION_RATE = 15
-const CROSSOVER_RATE = 75
-const ELITE_SIZE = 25
+const MUTATION_RATE = 1
+const CROSSOVER_RATE = 90
+const ELITE_SIZE = POPULATION_SIZE * 5 / 100
 
 const TD_WEIGHT = 0.35
 const FB_WEIGHT = 0.1
@@ -43,7 +43,7 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     end
 
     sorted_pop = sort(fit_scores, by=x -> x[3], rev=true)
-    parents = roulette_selection(sorted_pop)
+    parents = selection(sorted_pop, 2)
 
     elite = [individual[2] for individual in sorted_pop[1:ELITE_SIZE]]
     new_pop = copy(elite)
@@ -210,36 +210,54 @@ function evaluate_fitness(genome)
   return final_score
 end
 
-function roulette_selection(fit_scores)
-  total_fitness = sum(x -> x[3], fit_scores)
-  r1, r2 = rand(2) .* total_fitness
-  current_sum = 0.0
-  first_parent = last(fit_scores[2])
-  second_parent = last(fit_scores[2])
+# Stochastic Universal Sampling
+# Returns `n` selected chromosomes as parents
+function selection(fit_scores, n)
+  # Calculate the total fitness of the population
+  total_fitness = sum(score[3] for score in fit_scores)
 
-  for i in eachindex(fit_scores)
-    current_sum += fit_scores[i][3]
-    if current_sum > r1
-      first_parent = vec(fit_scores[i][2])
-    end
-    if current_sum > r2
-      second_parent = vec(fit_scores[i][2])
+  # Calculate the pointer distance and generate pointers
+  pointer_distance = total_fitness / n
+  start = rand() * pointer_distance
+  pointers = [start + i * pointer_distance for i in 0:(n-1)]
+
+  # Initialize selected parents
+  parents = []
+  current_sum = 0.0
+  pointer_index = 1
+
+  # Iterate through chromosomes to assign parents to pointers
+  for chrom in fit_scores
+    # Accumulate fitness
+    current_sum += chrom[3]
+
+    # Iterate through pointers that need a parent
+    for p in pointer_index:n
+      if current_sum >= pointers[p]
+        # Add chromosome to parents
+        push!(parents, chrom[2])
+        # Move to the next pointer
+        pointer_index += 1
+      else
+        # Stop checking further pointers for this chromosome
+        break
+      end
     end
   end
 
-  return first_parent, second_parent
+  return parents
 end
 
-function crossover(parent1::Vector{Char}, parent2::Vector{Char})
-  n = length(parent1)
+function crossover(parent_1, parent_2)
+  n = length(parent_1)
 
   point1, point2 = sort(rand(1:n, 2))
 
   child = fill(' ', n)
 
-  child[point1:point2] = parent1[point1:point2]
+  child[point1:point2] = parent_1[point1:point2]
 
-  function fill_child!(child::Vector{Char}, parent::Vector{Char})
+  function fill_child!(child, parent)
     j = point2 + 1
     i = point2 + 1
     while !all(!isspace, child)
@@ -260,7 +278,7 @@ function crossover(parent1::Vector{Char}, parent2::Vector{Char})
     end
   end
 
-  fill_child!(child, parent2)
+  fill_child!(child, parent_2)
 
   return permutedims(reshape(child, 10, 3))
 end
