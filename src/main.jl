@@ -1,120 +1,41 @@
-# Filtering for Bahasa Indonesia formal words
+# Filtering
 ## Preprocessing
+
 source_file = open("./kbbi.csv")
 
-output_dir = "word_classes/"
-
-if !isdir(output_dir)
-  mkdir(output_dir)
-end
-
 corpus_file = "corpus.txt"
-
-dict_file = "dict.csv"
-
-filtered_corpus_file = "filtered_corpus.csv"
+filtered_corpus_file = "filtered_corpus_2.csv"
 
 bigram_file = "bigrams.csv"
 trigram_file = "trigrams.csv"
 
 letter_freq = "letter_freq.csv"
 
-files_array = [
-  "nomina.csv",
-  "verba.csv",
-  "adjektiva.csv",
-  "adverbia.csv",
-  "pronomina.csv",
-  "numeralia.csv",
-  "preposisi.csv",
-]
+function filter_text_file(input_file::String, output_file::String)
+  # Define the allowed characters (a-z and specified symbols)
+  allowed_chars = Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    ';', ':', ',', '<', '.', '>', '/', '?', '\'', '"'])
 
-word_types = [
-  "[n]",
-  "[v]",
-  "[a]",
-  "[adv]",
-  "[pron]",
-  "[num]",
-  "[p]",
-]
-
-function filterdict(input_file)
-  file_by_line = readlines(input_file)
-
-  for (output_file, word_type) in zip(files_array, word_types)
-    type_array = []
-
-    for line in file_by_line
-      if contains(line, word_type)
-        split_line = split(line)
-        if length(split_line[1]) > 1
-          word = split_line[1]
-          push!(type_array, word)
+  # Open the input and output files
+  open(input_file, "r") do infile
+    open(output_file, "w") do outfile
+      for line in eachline(infile)
+        # Split the line into word and word_freq
+        parts = split(line, ' ')
+        if length(parts) == 2
+          word, word_freq = parts
+          # Filter to remove the words containing characters outside of allowed_chars
+          if all(c -> c in allowed_chars, word)
+            # Write the word and its frequency to the output file
+            write(outfile, word * " " * word_freq * "\n")
+          end
         end
       end
     end
-
-    output_path = joinpath(output_dir, output_file)
-
-    open(output_path, "w") do file
-      for word in type_array
-        write(file, word * "\n")
-      end
-    end
-
-    empty!(type_array)
   end
 
-  println("Dictionary successfully filtered")
-end
-
-function compiledict(output_file)
-  combined_set = Set{String}()
-
-  for file_name in readdir(output_dir)
-    file_path = joinpath(output_dir, file_name)
-    for line in eachline(file_path)
-      push!(combined_set, strip(line))
-    end
-  end
-
-  open(output_file, "w") do file
-    for word in sort(collect(combined_set))
-      write(file, lowercase(word) * "\n")
-    end
-  end
-
-  println("Dictionary successfully compiled")
-end
-
-function filtercorpus(input_file, dict_file, output_file)
-  combined_words_set = Set{String}()
-
-  for line in eachline(dict_file)
-    push!(combined_words_set, strip(line))
-  end
-
-  filtered_lines = []
-
-  for line in eachline(input_file)
-    word, wordfreq = split(line, r"\s+", limit=2)
-
-    if word in combined_words_set
-      if wordfreq == "99"
-        break
-      end
-      push!(filtered_lines, line)
-    end
-  end
-
-  open(output_file, "w") do file
-    for line in filtered_lines
-      write(file, line * "\n")
-    end
-  end
-
-  println("Corpus file successfully filtered")
+  println("Filtered text saved to: ", output_file)
 end
 
 function analyzeletterfreq(input_file, output_file, num_lines::Int=-1)
@@ -206,9 +127,7 @@ function analyze_trigrams(input_file, output_file)
 end
 
 function preprocessing()
-  filterdict(source_file)
-  compiledict(dict_file)
-  filtercorpus(corpus_file, dict_file, filtered_corpus_file)
+  filter_text_file(corpus_file, filtered_corpus_file)
 end
 
 function compileanalysis()
@@ -216,3 +135,6 @@ function compileanalysis()
   analyze_trigrams(filtered_corpus_file, trigram_file)
   analyzeletterfreq(filtered_corpus_file, letter_freq)
 end
+
+preprocessing()
+compileanalysis()

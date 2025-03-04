@@ -4,25 +4,38 @@ using PrettyPrinting
 const seed = 281820
 
 const POPULATION_SIZE = 2000
+const ELITE_SIZE = 150
 const MAX_GENERATIONS = 1000
-const MUTATION_RATE = 1
+const MAX_STAGNANT = 999
 const CROSSOVER_RATE = 90
-const ELITE_SIZE = POPULATION_SIZE * 5 / 100
+const MUTATION_RATE = 1
 
-const TD_WEIGHT = 0.35
-const FB_WEIGHT = 0.1
-const FU_WEIGHT = 0.2
-const CU_WEIGHT = 0.05
-const TE_WEIGHT = 0.3
+const TD_WEIGHT = 0.4
+const FU_WEIGHT = 0.1
+const HA_WEIGHT = 0.05
+const FA_WEIGHT = 0.05
+const BS_WEIGHT = 0.2
+const HD_WEIGHT = 0.2
 
 const BASE_TD = 15585.5
-const BASE_FB = 4479
-const BASE_FU = 44950.5
-const BASE_CU = 1879
-const BASE_TE = 636459
+const BASE_FU = 41760.5
+const BASE_HA = 8857
+const BASE_FA = 1879
+const BASE_BS = 607
+const BASE_HD = 4013
+
+const text_file = open(io -> read(io, String), "dummy_text.txt")
+
+const rngs = [MersenneTwister(seed + i) for i in 1:Threads.nthreads()]
 
 function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
-  println("Running Genetic Algorithm")
+  println("Running Genetic Algorithm with $(Threads.nthreads()) threads")
+  println("Population size: $(POPULATION_SIZE)")
+  println("Elite size: $(ELITE_SIZE)")
+  println("Max Gen: $(MAX_GENERATIONS)")
+  println("Max Stagnant: $(MAX_STAGNANT)")
+  println("Crossover rate: $(CROSSOVER_RATE)")
+  println("Mutation rate: $(MUTATION_RATE)")
 
   start_time = time()
 
@@ -37,15 +50,14 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
 
   for gen in 1:MAX_GENERATIONS
     fit_scores = []
-    for genome in pop
-      genome_fitness = evaluate_fitness(genome)
-      push!(fit_scores, [gen, genome, genome_fitness])
-    end
+
+    fit_scores = evaluate_population_fitness(pop)
 
     sorted_pop = sort(fit_scores, by=x -> x[3], rev=true)
     parents = selection(sorted_pop, 2)
 
     elite = [individual[2] for individual in sorted_pop[1:ELITE_SIZE]]
+
     new_pop = copy(elite)
 
     while length(new_pop) < POPULATION_SIZE
@@ -59,6 +71,7 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
         push!(new_pop, generate_random_genome())
       end
     end
+
     pop = new_pop
 
     current_best_genome = pop[1]
@@ -75,31 +88,34 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     print("\rGeneration $(gen)'s best: ", best_genome, " | Time elapsed: $(round(elapsed_time, digits=2))s")
     flush(stdout)
 
-    if stagnant_count > 100
+    if stagnant_count > MAX_STAGNANT
       println("\nFinished prematurely at: ", gen)
       return best_genome
     end
   end
 
-  println("\nDone!")
+  println("\nDone!\n")
   return pop[1]
 end
 
 function generate_random_genome()::Matrix{Char}
-  keys::Vector{Char} = [
-    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
+  tid = Threads.threadid()
+  keys = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
     'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';',
-    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
-  ]
-
-  return permutedims(reshape(shuffle!(keys), 10, 3))
+    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/']
+  shuffle!(rngs[tid], keys)
+  return permutedims(reshape(keys, 10, 3))
 end
 
-function initialize_population(pop_size::Int64)::Vector{Matrix{Char}}
-  return [generate_random_genome() for _ in 1:pop_size]
+function initialize_population(pop_size::Int64)
+  pop = Vector{Matrix{Char}}(undef, pop_size)
+  Threads.@threads for i in 1:pop_size
+    pop[i] = generate_random_genome()
+  end
+  return pop
 end
 
-function evaluate_fitness(genome)
+function evaluate_fitness(genome, show=false)
   default_finger_coordinate = Dict(
     "01_L-Pinky" => (2, 1),
     "02_L-Ring" => (2, 2),
@@ -127,13 +143,28 @@ function evaluate_fitness(genome)
     finger_assignments[genome[i, 10]] = "08_R-Pinky"
   end
 
-  text_file = open(io -> read(io, String), "dummy_text.txt")
-  finger_usage = Dict(finger => 0 for finger in values(finger_assignments))
   char_freq = zeros(3, 10)
-  total_distance = 0.0
-  consecutive_usage = 0
-  buffer_finger = ""
   buffer_coordinates = (0, 0)
+
+  # Finger utilisation variables
+  finger_utilisation = Dict(finger => 0 for finger in values(finger_assignments))
+
+  # Travel distance variables
+  total_distance = 0.0
+
+  # Finger alternation variables
+  finger_alternation = 0
+  buffer_finger = ""
+
+  # Hand alternation variables
+  hand_alternation = 0
+  buffer_hand = ""
+
+  # Big step variables
+  big_step = 0
+
+  # Hit Direction variables
+  hit_direction = 0
 
   for char in lowercase(text_file)
     if !isspace(char) && (char in genome)
@@ -141,71 +172,90 @@ function evaluate_fitness(genome)
 
       (i, j) = find_character_index(genome, char)
 
-      # Finger usage
-      finger_usage[current_finger] += 1
+      # Travel distance
+      x1, y1 = current_finger == buffer_finger ? buffer_coordinates : default_finger_coordinate[current_finger]
+      x2, y2 = (i, j)
+
+      total_distance += calculate_travel_distance(x1, y1, x2, y2)
+
+      # Finger utilisation
+      finger_utilisation[current_finger] += 1
       char_freq[i, j] += 1
 
-      # Travel distance
-      start_coordinates = current_finger == buffer_finger ? buffer_coordinates : default_finger_coordinate[current_finger]
-      end_coordinates = (i, j)
-      total_distance += calculate_travel_distance(start_coordinates[1], start_coordinates[2], end_coordinates[1], end_coordinates[2])
-
-      # Consecutive usage
-      if current_finger == buffer_finger
-        consecutive_usage += 1
+      # Hand alternation
+      if occursin("R-", current_finger)
+        current_hand = "Right Hand"
+      else
+        current_hand = "Left Hand"
       end
 
+      if current_hand == buffer_hand
+        hand_alternation += 1
+        # Hit direction
+        if calculate_direction(buffer_coordinates[2], y2) == "Outwards"
+          hit_direction += 1
+        end
+      end
+
+      # Finger alternation
+      if current_finger == buffer_finger
+        finger_alternation += 1
+      end
+
+      # Big step
+      if abs(x1 - x2) > 1
+        big_step += 1
+      end
+
+      buffer_hand = current_hand
       buffer_finger = current_finger
-      buffer_coordinates = end_coordinates
+      buffer_coordinates = x2, y2
+
     end
   end
 
-  # Calculate finger usage score
-  fu_multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
+  # Calculate finger utilisation score
+  fu_multiplier_array = [0.5, 1.0, 4.0, 2.0, 2.0, 4.0, 1.0, 0.5]
 
-  # fu_score = sum(finger_usage[finger] * fu_multiplier_array[idx] for (idx, finger) in enumerate(keys(finger_usage)))
   fu_score = 0
-  sorted_fu = sort(collect(finger_usage))
+  sorted_fu = sort(collect(finger_utilisation))
 
-  fu_multiplier_array = [1, 1.5, 4.0, 2.0, 2.0, 4.0, 1.5, 1]
   for i = 1:8
     fu_score += sorted_fu[i][2] * fu_multiplier_array[i]
   end
 
-  # Calculate typing effort score
-  te_multiplier_array = [
-    [1.0, 4.0, 4.0, 3.0, 2.0, 1.0, 3.0, 4.0, 4.0, 1.0],
-    [5.0, 5.0, 5.0, 5.0, 1.0, 1.0, 5.0, 5.0, 5.0, 5.0],
-    [1.0, 2.0, 2.0, 3.0, 1.0, 2.0, 3.0, 2.0, 2.0, 1.0]
-  ]
-
-  te_score = sum(sum(char_freq .* te_multiplier_array))
-
   # Calculate finger balance score
   fb_score = 0
-  sorted_keys = sort(collect(keys(finger_usage)))
+  sorted_keys = sort(collect(keys(finger_utilisation)))
   for i in 1:div(length(sorted_keys), 2)
     key_left = sorted_keys[i]
     key_right = sorted_keys[end-i+1]
-    value_left = finger_usage[key_left]
-    value_right = finger_usage[key_right]
+    value_left = finger_utilisation[key_left]
+    value_right = finger_utilisation[key_right]
     fb_score += -abs(value_left - value_right)
   end
 
-  # println(round(total_distance, digits=2))
-  # println(abs(fb_score))
-  # println(fu_score)
-  # println(abs(consecutive_usage))
-  # println(cf_score)
+  if (show == true)
+    println(sorted_fu)
+
+    println("Travel Distance (Lower better): ", round(total_distance, digits=2))
+    println("Finger Utilisation (Higher better): ", fu_score)
+    println("Hand Alternation (Lower better): ", hand_alternation)
+    println("Finger Alternation (Lower better): ", finger_alternation)
+    println("Avoidance of Big Steps (Lower better): ", big_step)
+    println("Hit Direction (Lower better): ", hit_direction)
+  end
 
   # Normalize scores
   td_norm = 1 - (round(total_distance, digits=2) / BASE_TD) # Lower better
-  fb_norm = ((BASE_FB - abs(fb_score)) / BASE_FB) # Lower better (closer to 0)
   fu_norm = ((fu_score - BASE_FU) / BASE_FU) # Higher better
-  cu_norm = ((BASE_CU - abs(consecutive_usage)) / BASE_CU) # Lower better
-  te_norm = ((te_score - BASE_TE) / BASE_TE) # Higher better
+  ha_norm = ((hand_alternation - BASE_HA) / BASE_HA) # Higher better
+  ha_norm = ((BASE_HA - hand_alternation) / BASE_HA) # Lower better
+  fa_norm = ((BASE_FA - finger_alternation) / BASE_FA) # Lower better
+  bs_norm = ((BASE_BS - big_step) / BASE_BS) # Lower better
+  hd_norm = ((BASE_HD - hit_direction) / BASE_HD) # Lower better
 
-  final_score = (td_norm * TD_WEIGHT) + (fb_norm * FB_WEIGHT) + (fu_norm * FU_WEIGHT) + (cu_norm * CU_WEIGHT) + (te_norm * TE_WEIGHT)
+  final_score = (td_norm * TD_WEIGHT) + (fu_norm * FU_WEIGHT) + (ha_norm * HA_WEIGHT) + (fa_norm * FA_WEIGHT) + (bs_norm * BS_WEIGHT) + (hd_norm * HD_WEIGHT)
 
   return final_score
 end
@@ -296,20 +346,20 @@ end
 
 # === HELPER FUNCTIONS ===
 
-function calculate_travel_distance(start_x, start_y, end_x, end_y)
-  distance_class = Dict(
-    "A" => 1.028, # A-Q
-    "B" => 1.108, # A-Z
-    "C" => 1.000, # F-G
-    "D" => 1.257, # F-T
-    "E" => 1.592, # J-Y Unique
-    "F" => 1.783, # F-B Unique
-    "G" => 1.129, # J-N Unique
-    "H" => 2.124, # Q-Z
-    "I" => 2.634, # R-B Unique
-    "J" => 2.020, # T-V
-  )
+const distance_class = Dict(
+  "A" => 1.028, # A-Q
+  "B" => 1.108, # A-Z
+  "C" => 1.000, # F-G
+  "D" => 1.257, # F-T
+  "E" => 1.592, # J-Y Unique
+  "F" => 1.783, # F-B Unique
+  "G" => 1.129, # J-N Unique
+  "H" => 2.124, # Q-Z
+  "I" => 2.634, # R-B Unique
+  "J" => 2.020, # T-V
+)
 
+function calculate_travel_distance(start_x, start_y, end_x, end_y)
   distance = 0
   coordinates = (start_x, start_y, end_x, end_y)
 
@@ -383,12 +433,43 @@ function find_character_index(matrix::Matrix{Char}, char::Char)
   return nothing
 end
 
+function calculate_direction(start, finish)
+  # Define the middle of the range (center)
+  center = 5.5  # For a range from 1 to 10
+
+  # If start < finish, you're moving upwards (higher value)
+  if start < finish
+    if finish > center
+      return "Outwards"  # Moving away from the center
+    else
+      return "Inwards"   # Moving towards the center
+    end
+  elseif start > finish
+    if finish < center
+      return "Outwards"  # Moving away from the center (in reverse)
+    else
+      return "Inwards"   # Moving towards the center
+    end
+  else
+    return "No movement"  # No movement
+  end
+end
+
+function evaluate_population_fitness(pop)
+  fit_scores = Vector{Any}(undef, length(pop))
+  Threads.@threads for i in eachindex(pop)
+    fit_scores[i] = [i, pop[i], evaluate_fitness(pop[i])]
+  end
+  return fit_scores
+end
+
 # === TESTING ===
 
 @time best_layout = geneticalgorithm(seed)
 
-println("Best Layout")
-println(best_layout, evaluate_fitness(best_layout))
+println("\nBest Layout\n")
+println(best_layout)
+println("Best Layout score: ", evaluate_fitness(best_layout, true))
 
 qwerty = [
   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
@@ -396,7 +477,10 @@ qwerty = [
   'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'
 ]
 reshaped_qwerty = permutedims(reshape(qwerty, 10, 3))
-println("Qwerty score: ", evaluate_fitness(reshaped_qwerty))
+
+println("\nQwerty\n")
+println(reshaped_qwerty)
+println("Qwerty score: ", evaluate_fitness(reshaped_qwerty, true))
 
 halmak = [
   'w', 'l', 'r', 'b', 'z', ';', 'q', 'u', 'd', 'j',
@@ -404,7 +488,10 @@ halmak = [
   'f', 'm', 'v', 'c', '/', 'g', 'p', 'x', 'k', 'y'
 ]
 reshaped_halmak = permutedims(reshape(halmak, 10, 3))
-println("Halmak score: ", evaluate_fitness(reshaped_halmak))
+
+println("\nHalmak\n")
+println(reshaped_halmak)
+println("Halmak score: ", evaluate_fitness(reshaped_halmak, true))
 
 test = [
   'f', 'h', 'b', 'g', 'c', ';', 'p', 'l', 'd', 'v',
@@ -412,4 +499,7 @@ test = [
   'q', 'x', 'z', 'o', 'w', 'j', 'y', ',', '.', '/'
 ]
 reshaped_test = permutedims(reshape(test, 10, 3))
-println("Test score: ", evaluate_fitness(reshaped_test))
+
+println("\nTest\n")
+println(reshaped_test)
+println("Test score: ", evaluate_fitness(reshaped_test, true))
