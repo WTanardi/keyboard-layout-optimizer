@@ -1,21 +1,37 @@
 using Random
 using PrettyPrinting
+using Statistics
+using Plots
 
 const seed = 281820
 
-const POPULATION_SIZE = 2000
-const ELITE_SIZE = 150
+const POPULATION_SIZE = 200
+const ELITE_SIZE = 20
 const MAX_GENERATIONS = 1000
-const MAX_STAGNANT = 999
-const CROSSOVER_RATE = 90
-const MUTATION_RATE = 1
+const MAX_STAGNANT = 500
+const CROSSOVER_RATE = 90 #/100
+const MUTATION_RATE = 1 #/1000
 
 const TD_WEIGHT = 0.4
-const FU_WEIGHT = 0.1
-const HA_WEIGHT = 0.05
-const FA_WEIGHT = 0.05
-const BS_WEIGHT = 0.2
-const HD_WEIGHT = 0.2
+const FU_WEIGHT = 0.18
+const HA_WEIGHT = 0.16
+const FA_WEIGHT = 0.16
+const BS_WEIGHT = 0.05
+const HD_WEIGHT = 0.05
+
+# const TD_WEIGHT = 0
+# const FU_WEIGHT = 0.13
+# const HA_WEIGHT = 0.28
+# const FA_WEIGHT = 0.22
+# const BS_WEIGHT = 0.20
+# const HD_WEIGHT = 0.17
+
+# const TD_WEIGHT = 1
+# const FU_WEIGHT = 0
+# const HA_WEIGHT = 0
+# const FA_WEIGHT = 0
+# const BS_WEIGHT = 0
+# const HD_WEIGHT = 0
 
 const BASE_TD = 15585.5
 const BASE_FU = 41760.5
@@ -26,16 +42,25 @@ const BASE_HD = 4013
 
 const text_file = open(io -> read(io, String), "dummy_text.txt")
 
-const rngs = [MersenneTwister(seed + i) for i in 1:Threads.nthreads()]
-
 function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
-  println("Running Genetic Algorithm with $(Threads.nthreads()) threads")
+  println("Running Genetic Algorithm\n")
+  println("CPU Threads: ", Sys.CPU_THREADS)
+  println("RAM: ", round(Sys.total_memory() / 1024^3, digits=2), " GB\n")
+
+  println("Seed: $(seed)")
   println("Population size: $(POPULATION_SIZE)")
   println("Elite size: $(ELITE_SIZE)")
   println("Max Gen: $(MAX_GENERATIONS)")
   println("Max Stagnant: $(MAX_STAGNANT)")
-  println("Crossover rate: $(CROSSOVER_RATE)")
-  println("Mutation rate: $(MUTATION_RATE)")
+  println("Crossover rate: $(CROSSOVER_RATE)%")
+  println("Mutation rate: $(MUTATION_RATE/10)%\n")
+
+  println("TD Weight: $(TD_WEIGHT)")
+  println("FU Weight: $(FU_WEIGHT)")
+  println("HA Weight: $(HA_WEIGHT)")
+  println("FA Weight: $(FA_WEIGHT)")
+  println("BS Weight: $(BS_WEIGHT)")
+  println("HD Weight: $(HD_WEIGHT)\n")
 
   start_time = time()
 
@@ -54,16 +79,17 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     fit_scores = evaluate_population_fitness(pop)
 
     sorted_pop = sort(fit_scores, by=x -> x[3], rev=true)
-    parents = selection(sorted_pop, 2)
 
     elite = [individual[2] for individual in sorted_pop[1:ELITE_SIZE]]
 
     new_pop = copy(elite)
 
     while length(new_pop) < POPULATION_SIZE
-      if rand(1:100) < CROSSOVER_RATE
+      parents = selection(sorted_pop, 2)
+
+      if rand(0:100) < CROSSOVER_RATE
         child = crossover(parents[1], parents[2])
-        if rand(1:100) < MUTATION_RATE
+        if rand(0:1000) < MUTATION_RATE
           child = mutate(child)
         end
         push!(new_pop, child)
@@ -85,8 +111,7 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
 
     elapsed_time = time() - start_time
 
-    print("\rGeneration $(gen)'s best: ", best_genome, " | Time elapsed: $(round(elapsed_time, digits=2))s")
-    flush(stdout)
+    print_progress(gen, best_genome, elapsed_time, stagnant_count)
 
     if stagnant_count > MAX_STAGNANT
       println("\nFinished prematurely at: ", gen)
@@ -94,16 +119,16 @@ function geneticalgorithm(seed::Union{Int,Nothing}=nothing)
     end
   end
 
-  println("\nDone!\n")
+  println("\n\nDone!\n")
+
   return pop[1]
 end
 
 function generate_random_genome()::Matrix{Char}
-  tid = Threads.threadid()
   keys = ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
     'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';',
     'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/']
-  shuffle!(rngs[tid], keys)
+  shuffle!(keys)
   return permutedims(reshape(keys, 10, 3))
 end
 
@@ -116,38 +141,13 @@ function initialize_population(pop_size::Int64)
 end
 
 function evaluate_fitness(genome, show=false)
-  default_finger_coordinate = Dict(
-    "01_L-Pinky" => (2, 1),
-    "02_L-Ring" => (2, 2),
-    "03_L-Middle" => (2, 3),
-    "04_L-Index" => (2, 4),
-    "05_R-Index" => (2, 7),
-    "06_R-Middle" => (2, 8),
-    "07_R-Ring" => (2, 9),
-    "08_R-Pinky" => (2, 10)
-  )
-
-  finger_assignments = Dict{Char,String}()
-  for i in 1:3
-    finger_assignments[genome[i, 1]] = "01_L-Pinky"
-    finger_assignments[genome[i, 2]] = "02_L-Ring"
-    finger_assignments[genome[i, 3]] = "03_L-Middle"
-    for j in 4:5
-      finger_assignments[genome[i, j]] = "04_L-Index"
-    end
-    for j in 6:7
-      finger_assignments[genome[i, j]] = "05_R-Index"
-    end
-    finger_assignments[genome[i, 8]] = "06_R-Middle"
-    finger_assignments[genome[i, 9]] = "07_R-Ring"
-    finger_assignments[genome[i, 10]] = "08_R-Pinky"
-  end
+  finger_assignments_dict = assign_finger_assignments(genome)
 
   char_freq = zeros(3, 10)
   buffer_coordinates = (0, 0)
 
   # Finger utilisation variables
-  finger_utilisation = Dict(finger => 0 for finger in values(finger_assignments))
+  finger_utilisation = Dict(finger => 0 for finger in values(finger_assignments_dict))
 
   # Travel distance variables
   total_distance = 0.0
@@ -168,7 +168,7 @@ function evaluate_fitness(genome, show=false)
 
   for char in lowercase(text_file)
     if !isspace(char) && (char in genome)
-      current_finger = finger_assignments[char]
+      current_finger = finger_assignments_dict[char]
 
       (i, j) = find_character_index(genome, char)
 
@@ -224,17 +224,6 @@ function evaluate_fitness(genome, show=false)
     fu_score += sorted_fu[i][2] * fu_multiplier_array[i]
   end
 
-  # Calculate finger balance score
-  fb_score = 0
-  sorted_keys = sort(collect(keys(finger_utilisation)))
-  for i in 1:div(length(sorted_keys), 2)
-    key_left = sorted_keys[i]
-    key_right = sorted_keys[end-i+1]
-    value_left = finger_utilisation[key_left]
-    value_right = finger_utilisation[key_right]
-    fb_score += -abs(value_left - value_right)
-  end
-
   if (show == true)
     println(sorted_fu)
 
@@ -249,7 +238,6 @@ function evaluate_fitness(genome, show=false)
   # Normalize scores
   td_norm = 1 - (round(total_distance, digits=2) / BASE_TD) # Lower better
   fu_norm = ((fu_score - BASE_FU) / BASE_FU) # Higher better
-  ha_norm = ((hand_alternation - BASE_HA) / BASE_HA) # Higher better
   ha_norm = ((BASE_HA - hand_alternation) / BASE_HA) # Lower better
   fa_norm = ((BASE_FA - finger_alternation) / BASE_FA) # Lower better
   bs_norm = ((BASE_BS - big_step) / BASE_BS) # Lower better
@@ -263,8 +251,23 @@ end
 # Stochastic Universal Sampling
 # Returns `n` selected chromosomes as parents
 function selection(fit_scores, n)
+  # Extract fitness values from fit_scores
+  fitness_values = [score[3] for score in fit_scores]
+
+  # Shift fitness values to make them non-negative
+  min_fitness = minimum(fitness_values)
+  if min_fitness < 0
+    fitness_values .-= min_fitness  # Shift all values by the absolute value of the minimum
+  end
+
   # Calculate the total fitness of the population
-  total_fitness = sum(score[3] for score in fit_scores)
+  total_fitness = sum(fitness_values)
+
+  # If total_fitness is zero (all fitness values were zero after shifting), set equal probabilities
+  if total_fitness == 0
+    fitness_values .= 1.0  # Assign equal fitness to all individuals
+    total_fitness = sum(fitness_values)
+  end
 
   # Calculate the pointer distance and generate pointers
   pointer_distance = total_fitness / n
@@ -277,9 +280,9 @@ function selection(fit_scores, n)
   pointer_index = 1
 
   # Iterate through chromosomes to assign parents to pointers
-  for chrom in fit_scores
-    # Accumulate fitness
-    current_sum += chrom[3]
+  for (i, chrom) in enumerate(fit_scores)
+    # Accumulate fitness (using shifted fitness values)
+    current_sum += fitness_values[i]
 
     # Iterate through pointers that need a parent
     for p in pointer_index:n
@@ -347,13 +350,13 @@ end
 # === HELPER FUNCTIONS ===
 
 const distance_class = Dict(
-  "A" => 1.028, # A-Q
-  "B" => 1.108, # A-Z
-  "C" => 1.000, # F-G
-  "D" => 1.257, # F-T
-  "E" => 1.592, # J-Y Unique
-  "F" => 1.783, # F-B Unique
-  "G" => 1.129, # J-N Unique
+  "A" => 1.000, # F-G
+  "B" => 1.028, # A-Q
+  "C" => 1.108, # A-Z
+  "D" => 1.129, # J-N Unique
+  "E" => 1.257, # F-T
+  "F" => 1.592, # J-Y Unique
+  "G" => 1.783, # F-B Unique
   "H" => 2.124, # Q-Z
   "I" => 2.634, # R-B Unique
   "J" => 2.020, # T-V
@@ -363,53 +366,30 @@ function calculate_travel_distance(start_x, start_y, end_x, end_y)
   distance = 0
   coordinates = (start_x, start_y, end_x, end_y)
 
-  # J-N Unique
   if coordinates in [(2, 7, 3, 6), (3, 6, 2, 7), (2, 5, 3, 4), (3, 4, 2, 5)]
-    distance = distance_class["G"]
-
-    # J-Y Unique
-  elseif coordinates in [(2, 7, 1, 6), (1, 6, 2, 7), (2, 5, 1, 4), (1, 4, 2, 5)]
-    distance = distance_class["E"]
-
-    # F-B Unique
-  elseif coordinates in [(2, 4, 3, 5), (3, 5, 2, 4), (2, 6, 3, 7), (3, 7, 2, 6)]
-    distance = distance_class["F"]
-
-    # F-T, H-U Semi-Unique
-  elseif coordinates in [(2, 4, 1, 5), (2, 6, 1, 7), (1, 5, 2, 4), (1, 7, 2, 6)]
     distance = distance_class["D"]
-
-    # R-B, Y-M Semi-Unique
+  elseif coordinates in [(2, 7, 1, 6), (1, 6, 2, 7), (2, 5, 1, 4), (1, 4, 2, 5)]
+    distance = distance_class["F"]
+  elseif coordinates in [(2, 4, 3, 5), (3, 5, 2, 4), (2, 6, 3, 7), (3, 7, 2, 6)]
+    distance = distance_class["G"]
+  elseif coordinates in [(2, 4, 1, 5), (2, 6, 1, 7), (1, 5, 2, 4), (1, 7, 2, 6)]
+    distance = distance_class["E"]
   elseif coordinates in [(1, 4, 3, 5), (3, 5, 1, 4), (1, 6, 3, 7), (3, 7, 1, 6)]
     distance = distance_class["I"]
-
-    # T-V, U-N Semi-Unique
   elseif coordinates in [(1, 5, 3, 4), (3, 4, 1, 5), (1, 7, 3, 6), (3, 6, 1, 7)]
     distance = distance_class["J"]
-
-    # No movement
   elseif (start_x == end_x && start_y == end_y)
     distance = 0
-
   elseif start_y == end_y
-
-    # Second to First row & vice versa
     if start_x + end_x == 3
-      distance = distance_class["A"]
-
-      # Second to Third row & vice versa
-    elseif start_x + end_x == 5
       distance = distance_class["B"]
-
-      # First to Third row & vice versa
+    elseif start_x + end_x == 5
+      distance = distance_class["C"]
     elseif start_x + end_x == 4
       distance = distance_class["H"]
     end
-
-    # Side to side (Can only happen to index fingers)
   elseif (start_x == end_x) && ((start_y, end_y) in [(4, 5), (5, 4), (6, 7), (7, 6)])
-    distance = distance_class["C"]
-
+    distance = distance_class["A"]
   else
     println(start_x, start_y, end_x, end_y)
     @error "Invalid movement"
@@ -461,6 +441,54 @@ function evaluate_population_fitness(pop)
     fit_scores[i] = [i, pop[i], evaluate_fitness(pop[i])]
   end
   return fit_scores
+end
+
+const default_finger_coordinate = Dict(
+  "01_L-Pinky" => (2, 1),
+  "02_L-Ring" => (2, 2),
+  "03_L-Middle" => (2, 3),
+  "04_L-Index" => (2, 4),
+  "05_R-Index" => (2, 7),
+  "06_R-Middle" => (2, 8),
+  "07_R-Ring" => (2, 9),
+  "08_R-Pinky" => (2, 10)
+)
+
+function assign_finger_assignments(genome)
+  finger_assignments = Dict{Char,String}()
+  for i in 1:3
+    finger_assignments[genome[i, 1]] = "01_L-Pinky"
+    finger_assignments[genome[i, 2]] = "02_L-Ring"
+    finger_assignments[genome[i, 3]] = "03_L-Middle"
+    for j in 4:5
+      finger_assignments[genome[i, j]] = "04_L-Index"
+    end
+    for j in 6:7
+      finger_assignments[genome[i, j]] = "05_R-Index"
+    end
+    finger_assignments[genome[i, 8]] = "06_R-Middle"
+    finger_assignments[genome[i, 9]] = "07_R-Ring"
+    finger_assignments[genome[i, 10]] = "08_R-Pinky"
+  end
+  return finger_assignments
+end
+
+function print_progress(gen, best_genome, elapsed_time, stagnant_count)
+  # Move cursor up 1 line (if not first iteration)
+  if gen > 1
+    print("\e[1A\e[1A\e[1A\e[1A\e[1A\e[1A\e[1A")  # ANSI escape code: move up
+  end
+
+  # Overwrite both lines
+  print("\rGeneration $(gen)'s best: \n\n")  # \n for newline
+
+  print("\r", best_genome[1, :], " \n")
+  print("\r", best_genome[2, :], " \n")
+  print("\r", best_genome[3, :], " \n\n")
+
+  print("\rTime elapsed: $(round(elapsed_time, digits=2))s  \n")  # Extra spaces to clear leftovers
+  print("\rStagnant count: $(stagnant_count) ")  # Extra spaces to clear leftovers
+  flush(stdout)
 end
 
 # === TESTING ===

@@ -12,22 +12,17 @@ trigram_file = "trigrams.csv"
 letter_freq = "letter_freq.csv"
 
 function filter_text_file(input_file::String, output_file::String)
-  # Define the allowed characters (a-z and specified symbols)
   allowed_chars = Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
     'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
     ';', ':', ',', '<', '.', '>', '/', '?', '\'', '"'])
 
-  # Open the input and output files
   open(input_file, "r") do infile
     open(output_file, "w") do outfile
       for line in eachline(infile)
-        # Split the line into word and word_freq
         parts = split(line, ' ')
         if length(parts) == 2
           word, word_freq = parts
-          # Filter to remove the words containing characters outside of allowed_chars
           if all(c -> c in allowed_chars, word)
-            # Write the word and its frequency to the output file
             write(outfile, word * " " * word_freq * "\n")
           end
         end
